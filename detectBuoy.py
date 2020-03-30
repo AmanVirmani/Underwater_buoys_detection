@@ -1,5 +1,6 @@
 import cv2
 import numpy as np
+import matplotlib.pyplot as plt
 
 
 def main():
@@ -23,8 +24,14 @@ def main():
                     cv2.circle(output, (x, y), r, (0, 255, 0), 4)
                     cv2.rectangle(output, (x-5, y-5), (x+5, y+5), (0, 128, 255), -1)
                     roi.append(frame[y-r:y+r, x-r:x+r, :])
-                    #cv2.imshow('roi', roi[-1])
-                    #cv2.waitKey(0)
+                    color = ('b','g','r')
+                    for i, col in enumerate(color):
+                        histr = cv2.calcHist([roi[-1]], [i], None, [256], [0, 256])
+                        plt.plot(histr, color=col)
+                        plt.xlim([0, 256])
+                    plt.show()
+                    cv2.imshow('roi', roi[-1])
+                    cv2.waitKey(0)
             #cv2.imshow("output", np.hstack([frame, output]))
             #cv2.waitKey(0)
             # break
