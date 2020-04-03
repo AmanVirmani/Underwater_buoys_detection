@@ -31,31 +31,29 @@ def GMM_EM(data, k=3):
     weights, means, cov = init_params(data, k)
 
     for step in range(125):
-        for img in data:
-            likelihood = []
-            # Expectation step
-            for j in range(k):
-              likelihood.append(multivariate_normal.pdf(x=img, mean=means[j], cov=cov[j]))
-            likelihood = np.array(likelihood)
-            #assert likelihood.shape == (k, img.shape)
+        likelihood = []
+        # Expectation step
+        for j in range(k):
+            likelihood.append(multivariate_normal.pdf(x=data, mean=means[j], cov=cov[j]))
+        likelihood = np.array(likelihood)
+        assert likelihood.shape == (k, len(data))
 
-            b = []
-            # Maximization step
-            for j in range(k):
-                # use the current values for the parameters to evaluate the posterior
-                # probabilities of the data to have been generanted by each gaussian
-                b.append((likelihood[j] * weights[j]) / (np.sum([likelihood[i] * weights[i] for i in range(k)], axis=0)+eps))
+        b = []
+        # Maximization step
+        for j in range(k):
+            # use the current values for the parameters to evaluate the posterior
+            # probabilities of the data to have been generanted by each gaussian
+            b.append((likelihood[j] * weights[j]) / (np.sum([likelihood[i] * weights[i] for i in range(k)], axis=0)+eps))
 
-                h, w = img.shape[:2]
-                # updage mean and variance
-                means[j] = np.sum(b[j].reshape(w*h,1) * img.flatten(), axis=0) / (np.sum(b[j]+eps))
-                cov[j] = np.dot((b[j].reshape(w*h,1) * (img - means[j])).T, (img - means[j])) / (np.sum(b[j])+eps)
+            # updage mean and variance
+            means[j] = np.sum(b[j].reshape(len(data), 1) * data, axis=0) / (np.sum(b[j]+eps))
+            cov[j] = np.dot((b[j].reshape(len(data), 1) * (data - means[j])).T, (data - means[j])) / (np.sum(b[j])+eps)
 
-                # update the weights
-                weights[j] = np.mean(b[j])
+            # update the weights
+            weights[j] = np.mean(b[j])
 
-                assert cov.shape == (k, img.shape[2], img.shape[2])
-                assert means.shape == (k, img.shape[2])
+            assert cov.shape == (k, data.shape[-1], data.shape[-1])
+            assert means.shape == (k, data.shape[-1])
             
             
             # old
@@ -82,6 +80,7 @@ def load_data():
         img = cv2.imread(os.path.join(dirpath,filename))
         img = cv2.resize(img, (40, 40), interpolation=cv2.INTER_LINEAR)
         img = img[6:34, 6:34]
+        data.append(img)
 
         # # plotting histogram
         # hist = cv2.calcHist([img], [0], None, [256], [0, 256])
@@ -89,12 +88,13 @@ def load_data():
         # plt.show()
 
 
-        data.append(img)
         #cv2.imshow('img',img)
         #cv2.waitKey(0)
         #print("image shape is: ", end=" ")
         #print(img.shape)
-    return np.array(data)
+    data = np.array(data)
+    data = data.reshape((np.prod(data.shape[0:-1]), data.shape[-1]))
+    return data
 
 def predict(video, mean, var, weights):
     cap = cv2.VideoCapture(video)
@@ -132,7 +132,7 @@ def predict(video, mean, var, weights):
 def main():
     data = load_data()
     print(data.shape)
-    means, cov, weights = GMM_EM(data,3)
+    means, cov, weights = GMM_EM(data, 4)
     print(means)
     print(cov)
     print(weights)
