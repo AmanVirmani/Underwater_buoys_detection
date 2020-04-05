@@ -4,33 +4,26 @@ import os
 import matplotlib.pyplot as plt
 from scipy.stats import multivariate_normal
 from sklearn.datasets import make_spd_matrix
+import argparse
 
 
-def init_params(X, k):
+def init_params(data, k):
     weights = np.ones((k)) / k
-    mean = np.random.choice(X.flatten(), (k, X.shape[-1]))
+    mean = np.random.choice(data.flatten(), (k, data.shape[-1]))
     cov = []
     for i in range(k):
-      cov.append(make_spd_matrix(X.shape[-1]))
+        cov.append(make_spd_matrix(data.shape[-1]))
     cov = np.array(cov)
     return weights, mean, cov
 
 
-def pdf(data, mean: float, variance: float):
-    # A normal continuous random variable.
-    s1 = 1/(np.sqrt(2*np.pi*variance))
-    s2 = np.exp(-(np.square(data - mean)/(2*variance)))
-    return s1 * s2
-
-
 def GMM_EM(data, k=3):
-    bound = 0.001
-    max_itr = 1000
+    max_itr = 400
     eps = 1e-8
 
     weights, means, cov = init_params(data, k)
 
-    for step in range(125):
+    for step in range(max_itr):
         likelihood = []
         # Expectation step
         for j in range(k):
@@ -45,56 +38,39 @@ def GMM_EM(data, k=3):
             # probabilities of the data to have been generanted by each gaussian
             b.append((likelihood[j] * weights[j]) / (np.sum([likelihood[i] * weights[i] for i in range(k)], axis=0)+eps))
 
-            # updage mean and variance
+            # update mean and variance
             means[j] = np.sum(b[j].reshape(len(data), 1) * data, axis=0) / (np.sum(b[j]+eps))
-            cov[j] = np.dot((b[j].reshape(len(data), 1) * (data - means[j])).T, (data - means[j])) / (np.sum(b[j])+eps)
+            cov[j] = np.dot((b[j].reshape(len(data), 1) * (data - means[j])).T, (data - means[j])) / (np.sum(b[j]+eps))
 
             # update the weights
             weights[j] = np.mean(b[j])
 
             assert cov.shape == (k, data.shape[-1], data.shape[-1])
             assert means.shape == (k, data.shape[-1])
-            
-            
-            # old
-#            likelihood = []
-#            for j in range(k):
-#                likelihood.append(pdf(line, mean[j], np.sqrt(var[j])))
-#            likelihood = np.array(likelihood)
-#            b = []
-#
-#            for j in range(k):
-#                b.append((likelihood[j]*weights[j])/(np.sum([likelihood[i]*weights[i] for i in range(k)],axis=0)+eps))
-#
-#                mean[j] = np.sum(b[j]*line) / (np.sum(b[j]+eps))
-#                var[j] = np.sum(b[j] * np.square(line - mean[j])) / (np.sum(b[j]+eps))
-#                weights[j] = np.mean(b[j])
-#
-    np.save('params.npy', [means, cov, weights])
+
+    #np.save('params.npy', [means, cov, weights])
     return means, cov, weights
 
-def load_data():
+
+def load_data(dirpath):
     data = []
-    dirpath = "data/train/green/"
     for filename in os.listdir(dirpath):
         img = cv2.imread(os.path.join(dirpath,filename))
         img = cv2.resize(img, (40, 40), interpolation=cv2.INTER_LINEAR)
         img = img[6:34, 6:34]
         data.append(img)
-
-        # # plotting histogram
-        # hist = cv2.calcHist([img], [0], None, [256], [0, 256])
-        # plt.plot(hist)
-        # plt.show()
-
-
-        #cv2.imshow('img',img)
-        #cv2.waitKey(0)
-        #print("image shape is: ", end=" ")
-        #print(img.shape)
-    data = np.array(data)
+    data = np.array(data, dtype= np.float64)
+    data = data/255
     data = data.reshape((np.prod(data.shape[0:-1]), data.shape[-1]))
     return data
+
+
+def plot_hist(images):
+    for img in images:
+        hist = cv2.calcHist([img], [0], None, [256], [0, 256])
+        plt.plot(hist)
+        plt.show()
+
 
 def predict(video, mean, var, weights):
     cap = cv2.VideoCapture(video)
@@ -104,24 +80,24 @@ def predict(video, mean, var, weights):
     while cap.isOpened():
         ret, frame = cap.read()
         if ret:
-            test = frame.copy()
-            h, w, ch = test.shape#[:2]
-            #green = test[:, :, 1]
+            test = frame.reshape((np.prod(frame.shape[0:-1]), frame.shape[-1]))
+            l, ch = test.shape
             k = len(mean)
-            prob = np.zeros((w*h*ch, k))
-            likelihood = np.zeros((w*h*ch, 1))
+            prob = np.zeros((l, k))
+            likelihood = np.zeros((l, 1))
 
             for j in range(k):
-                prob[:, j] = weights[j]*pdf(test.flatten(), mean[j], var[j])
+                prob[:, j] = weights[j]*multivariate_normal.pdf(test/255, mean[j], var[j])
 
             likelihood = prob.sum(1)
 
-            probabilities = np.reshape(likelihood, (h, w, ch))
-            probabilities[probabilities < np.max(probabilities)/2] = 0
-            probabilities[probabilities > np.max(probabilities)/2] = 255
-            output = np.zeros_like(test)
+            probabilities = np.reshape(likelihood, frame.shape[:2])
+            probabilities = probabilities*255
+            probabilities[probabilities < 200] = 0
+            output = np.zeros_like(frame)
             output = probabilities
-            final = np.hstack((test, output))
+            final = np.hstack((frame[:,:,1], output))
+            cv2.imshow('input', frame)
             cv2.imshow('prob', output)
             cv2.waitKey(0)
         else:
@@ -129,15 +105,16 @@ def predict(video, mean, var, weights):
 
 
 
-def main():
-    data = load_data()
-    print(data.shape)
-    means, cov, weights = GMM_EM(data, 4)
-    print(means)
-    print(cov)
-    print(weights)
-    #predict('./data/detectbuoy.avi', mean, var, weights)
+def main(args):
+    data = load_data(args["train"])
+    means, cov, weights = GMM_EM(data, 3)
+    predict(args["test"], means, cov, weights)
 
 
 if __name__ == '__main__':
-   main()
+    ap = argparse.ArgumentParser()
+    ap.add_argument("-train", "--train", required=False, help="Input training images", default='./data/train/yellow', type=str)
+    ap.add_argument("-test", "--test", required=False, help="Test video", default='./data/detectbuoy.avi', type=str)
+    args = vars(ap.parse_args())
+
+    main(args)
