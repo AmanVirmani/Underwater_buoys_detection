@@ -7,49 +7,83 @@ from sklearn.datasets import make_spd_matrix
 import argparse
 
 
-def init_params(data, k):
-    weights = np.ones((k)) / k
-    mean = np.random.choice(data.flatten(), (k, data.shape[-1]))
-    cov = []
-    for i in range(k):
-        cov.append(make_spd_matrix(data.shape[-1]))
-    cov = np.array(cov)
-    return weights, mean, cov
+class GMM_EM:
+
+    def __init__(self, data, clusters, max_itr=400, eps=1e-8):
+        self.train_data = data
+        self.clusters = clusters
+        self.max_itr = max_itr
+        self.eps = eps
+        self.weights = np.ones(self.clusters) / self.clusters
+        self.means = np.random.choice(data.flatten(), (self.clusters, data.shape[-1]))
+        self.cov = np.array([make_spd_matrix(data.shape[-1]) for i in range(self.clusters)])
+
+    def train(self):
+        for step in range(self.max_itr):
+            likelihood = []
+            # Expectation step
+            for j in range(self.clusters):
+                likelihood.append(multivariate_normal.pdf(x=self.train_data, mean=self.means[j], cov=self.cov[j]))
+            likelihood = np.array(likelihood)
+            assert likelihood.shape == (self.clusters, len(self.train_data))
+
+            b = []
+            # Maximization step
+            for j in range(self.clusters):
+                # use the current values for the parameters to evaluate the posterior
+                # probabilities of the (self.train_data to have been generanted by each gaussian
+                b.append((likelihood[j] * self.weights[j]) / (np.sum([likelihood[i] * self.weights[i] for i in range(self.clusters)], axis=0)+self.eps))
+
+                # update mean and variance
+                self.means[j] = np.sum(b[j].reshape(len(self.train_data), 1) * self.train_data, axis=0) / (np.sum(b[j]+self.eps))
+                self.cov[j] = np.dot((b[j].reshape(len(self.train_data), 1) * (self.train_data - self.means[j])).T, (self.train_data - self.means[j])) / (np.sum(b[j]+self.eps))
+
+                # update the (self.weights
+                self.weights[j] = np.mean(b[j])
+
+                assert self.cov.shape == (self.clusters, self.train_data.shape[-1], self.train_data.shape[-1])
+                assert self.means.shape == (self.clusters, self.train_data.shape[-1])
+
+        #np.save('params.npy', [self.means, self.cov, (self.weights])
+        return self.means, self.cov, self.weights
+
+    def predict(self, video):
+        cap = cv2.VideoCapture(video)
+        images = []
+        if not cap.isOpened():
+            print("error reading video file")
+        while cap.isOpened():
+            ret, frame = cap.read()
+            if ret:
+                test = frame.reshape((np.prod(frame.shape[0:-1]), frame.shape[-1]))
+                l, ch = test.shape
+                prob = np.zeros((l, self.clusters))
+                likelihood = np.zeros((l, 1))
+
+                for j in range(self.clusters):
+                    prob[:, j] = self.weights[j]*multivariate_normal.pdf(test/255, self.means[j], self.cov[j])
+
+                likelihood = prob.sum(1)
+
+                probabilities = np.reshape(likelihood, frame.shape[:2])
+                probabilities = probabilities*255
+                probabilities[probabilities < 200] = 0
+                prob_img = detect_circle(probabilities)
+                cv2.imshow('input', frame)
+                cv2.imshow('prob', prob_img)
+                cv2.waitKey(0)
+            else:
+                break
 
 
-def GMM_EM(data, k=3):
-    max_itr = 400
-    eps = 1e-8
-
-    weights, means, cov = init_params(data, k)
-
-    for step in range(max_itr):
-        likelihood = []
-        # Expectation step
-        for j in range(k):
-            likelihood.append(multivariate_normal.pdf(x=data, mean=means[j], cov=cov[j]))
-        likelihood = np.array(likelihood)
-        assert likelihood.shape == (k, len(data))
-
-        b = []
-        # Maximization step
-        for j in range(k):
-            # use the current values for the parameters to evaluate the posterior
-            # probabilities of the data to have been generanted by each gaussian
-            b.append((likelihood[j] * weights[j]) / (np.sum([likelihood[i] * weights[i] for i in range(k)], axis=0)+eps))
-
-            # update mean and variance
-            means[j] = np.sum(b[j].reshape(len(data), 1) * data, axis=0) / (np.sum(b[j]+eps))
-            cov[j] = np.dot((b[j].reshape(len(data), 1) * (data - means[j])).T, (data - means[j])) / (np.sum(b[j]+eps))
-
-            # update the weights
-            weights[j] = np.mean(b[j])
-
-            assert cov.shape == (k, data.shape[-1], data.shape[-1])
-            assert means.shape == (k, data.shape[-1])
-
-    #np.save('params.npy', [means, cov, weights])
-    return means, cov, weights
+def detect_circle(gray_img):
+    circles = cv2.HoughCircles(gray_img.astype(np.uint8), cv2.HOUGH_GRADIENT, 1.5, 90, param1=150, param2=35, minRadius=0, maxRadius=40)
+    out = np.zeros(gray_img.shape)
+    if circles is not None:
+        circles = np.uint16(np.around(circles[0, :]))
+        for circle in circles:
+            out = cv2.circle(out, tuple(circle[0:2]), circle[2], [255], -1)
+    return out
 
 
 def load_data(dirpath):
@@ -72,43 +106,11 @@ def plot_hist(images):
         plt.show()
 
 
-def predict(video, mean, var, weights):
-    cap = cv2.VideoCapture(video)
-    images = []
-    if not cap.isOpened():
-        print("error reading video file")
-    while cap.isOpened():
-        ret, frame = cap.read()
-        if ret:
-            test = frame.reshape((np.prod(frame.shape[0:-1]), frame.shape[-1]))
-            l, ch = test.shape
-            k = len(mean)
-            prob = np.zeros((l, k))
-            likelihood = np.zeros((l, 1))
-
-            for j in range(k):
-                prob[:, j] = weights[j]*multivariate_normal.pdf(test/255, mean[j], var[j])
-
-            likelihood = prob.sum(1)
-
-            probabilities = np.reshape(likelihood, frame.shape[:2])
-            probabilities = probabilities*255
-            probabilities[probabilities < 200] = 0
-            output = np.zeros_like(frame)
-            output = probabilities
-            final = np.hstack((frame[:,:,1], output))
-            cv2.imshow('input', frame)
-            cv2.imshow('prob', output)
-            cv2.waitKey(0)
-        else:
-            break
-
-
-
 def main(args):
     data = load_data(args["train"])
-    means, cov, weights = GMM_EM(data, 3)
-    predict(args["test"], means, cov, weights)
+    gmm = GMM_EM(data,3)
+    means, cov, weights = gmm.train()
+    gmm.predict(args["test"])
 
 
 if __name__ == '__main__':
