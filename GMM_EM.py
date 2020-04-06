@@ -5,20 +5,34 @@ import matplotlib.pyplot as plt
 from scipy.stats import multivariate_normal
 from sklearn.datasets import make_spd_matrix
 import argparse
-
+import colors
 
 class GMM_EM:
 
-    def __init__(self, data, clusters, max_itr=400, eps=1e-8):
+    def __init__(self, data, clusters, color="test",  max_itr=400, eps=1e-8):
         self.train_data = data
         self.clusters = clusters
+        self.color = self.color2pixel(color)
         self.max_itr = max_itr
         self.eps = eps
         self.weights = np.ones(self.clusters) / self.clusters
         self.means = np.random.choice(data.flatten(), (self.clusters, data.shape[-1]))
         self.cov = np.array([make_spd_matrix(data.shape[-1]) for i in range(self.clusters)])
 
+    def color2pixel(self, color):
+        if color=="yellow":
+            return colors.yellow
+        elif color=="orange":
+            return colors.orange
+        elif color=="green":
+            return colors.green
+        else:
+            print("color not recognized")
+            return [0, 0, 0]
+
     def train(self):
+        mle = []
+        prev_mle = 0
         for step in range(self.max_itr):
             likelihood = []
             # Expectation step
@@ -43,9 +57,47 @@ class GMM_EM:
 
                 assert self.cov.shape == (self.clusters, self.train_data.shape[-1], self.train_data.shape[-1])
                 assert self.means.shape == (self.clusters, self.train_data.shape[-1])
+            mle.append(np.log(np.sum(np.ravel(b))))
+            if np.abs(mle[-1] - prev_mle) < self.eps:
+                print("GMM converged")
+                break
+            prev_mle = mle[-1]
 
+        plt.plot(mle)
+        plt.show()
         #np.save('params.npy', [self.means, self.cov, (self.weights])
         return self.means, self.cov, self.weights
+
+    def segment_image(self, img):
+        test = img.reshape((np.prod(img.shape[0:-1]), img.shape[-1]))
+        l, ch = test.shape
+        prob = np.zeros((l, self.clusters))
+        likelihood = np.zeros((l, 1))
+
+        for j in range(self.clusters):
+            prob[:, j] = self.weights[j]*multivariate_normal.pdf(test/255, self.means[j], self.cov[j])
+
+        likelihood = prob.sum(1)
+
+        probabilities = np.reshape(likelihood, img.shape[:2])
+        probabilities = probabilities*255
+        probabilities[probabilities < 200] = 0
+        circles = cv2.HoughCircles(probabilities.astype(np.uint8), cv2.HOUGH_GRADIENT, 1.5, 90, param1=150, param2=35,
+                                   minRadius=0, maxRadius=40)
+        if circles is None:
+            print("no buoy detected")
+            return
+        for circle in circles[0, :]:
+            output = cv2.circle(img.copy(), (circle[0], circle[1]), circle[2], self.color, 2)
+        cv2.imshow('input', img)
+        cv2.imshow('prob', output)
+        cv2.waitKey(10)
+        return circle[0, :]
+
+    def test(self, test_dir):
+        for img_path in os.listdir(test_dir):
+            img = cv2.imread(test_dir+img_path)
+            self.segment_image(img)
 
     def predict(self, video):
         cap = cv2.VideoCapture(video)
@@ -55,23 +107,7 @@ class GMM_EM:
         while cap.isOpened():
             ret, frame = cap.read()
             if ret:
-                test = frame.reshape((np.prod(frame.shape[0:-1]), frame.shape[-1]))
-                l, ch = test.shape
-                prob = np.zeros((l, self.clusters))
-                likelihood = np.zeros((l, 1))
-
-                for j in range(self.clusters):
-                    prob[:, j] = self.weights[j]*multivariate_normal.pdf(test/255, self.means[j], self.cov[j])
-
-                likelihood = prob.sum(1)
-
-                probabilities = np.reshape(likelihood, frame.shape[:2])
-                probabilities = probabilities*255
-                probabilities[probabilities < 200] = 0
-                prob_img = detect_circle(probabilities)
-                cv2.imshow('input', frame)
-                cv2.imshow('prob', prob_img)
-                cv2.waitKey(0)
+                self.segment_image(frame)
             else:
                 break
 
@@ -108,14 +144,15 @@ def plot_hist(images):
 
 def main(args):
     data = load_data(args["train"])
-    gmm = GMM_EM(data,3)
+    gmm = GMM_EM(data, 3, max_itr=1000)
     means, cov, weights = gmm.train()
+    #gmm.test('./data/test/yellow/')
     gmm.predict(args["test"])
 
 
 if __name__ == '__main__':
     ap = argparse.ArgumentParser()
-    ap.add_argument("-train", "--train", required=False, help="Input training images", default='./data/train/yellow', type=str)
+    ap.add_argument("-train", "--train", required=False, help="Input training images", default='./data/train/green', type=str)
     ap.add_argument("-test", "--test", required=False, help="Test video", default='./data/detectbuoy.avi', type=str)
     args = vars(ap.parse_args())
 
