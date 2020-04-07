@@ -92,12 +92,12 @@ class GMM_EM:
         cv2.imshow('input', img)
         cv2.imshow('prob', output)
         cv2.waitKey(10)
-        return circle[0, :]
+        return circles[0, :]
 
     def test(self, test_dir):
         for img_path in os.listdir(test_dir):
             img = cv2.imread(test_dir+img_path)
-            self.segment_image(img)
+            c = self.segment_image(img)
 
     def predict(self, video):
         cap = cv2.VideoCapture(video)
@@ -107,7 +107,7 @@ class GMM_EM:
         while cap.isOpened():
             ret, frame = cap.read()
             if ret:
-                self.segment_image(frame)
+                c = self.segment_image(frame)
             else:
                 break
 
@@ -144,7 +144,7 @@ def plot_hist(images):
 
 def main(args):
     data = load_data(args["train"])
-    gmm = GMM_EM(data, 3, max_itr=1000)
+    gmm = GMM_EM(data, args["clusters"], max_itr=1000)
     means, cov, weights = gmm.train()
     #gmm.test('./data/test/yellow/')
     gmm.predict(args["test"])
@@ -152,6 +152,7 @@ def main(args):
 
 if __name__ == '__main__':
     ap = argparse.ArgumentParser()
+    ap.add_argument("-k", "--clusters", required=False, help="No. of clusters", default=3, type=int)
     ap.add_argument("-train", "--train", required=False, help="Input training images", default='./data/train/green', type=str)
     ap.add_argument("-test", "--test", required=False, help="Test video", default='./data/detectbuoy.avi', type=str)
     args = vars(ap.parse_args())
