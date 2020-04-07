@@ -86,18 +86,17 @@ class GMM_EM:
                                    minRadius=0, maxRadius=40)
         if circles is None:
             print("no buoy detected")
-            return
+            return None
         for circle in circles[0, :]:
             output = cv2.circle(img.copy(), (circle[0], circle[1]), circle[2], self.color, 2)
-        cv2.imshow('input', img)
-        cv2.imshow('prob', output)
-        cv2.waitKey(10)
-        return circles[0, :]
-
+        #cv2.imshow('input', img)
+        #cv2.imshow('prob', output)
+        #cv2.waitKey(10)
+        return output
     def test(self, test_dir):
         for img_path in os.listdir(test_dir):
             img = cv2.imread(test_dir+img_path)
-            c = self.segment_image(img)
+            output = self.segment_image(img)
 
     def predict(self, video):
         cap = cv2.VideoCapture(video)
@@ -107,9 +106,21 @@ class GMM_EM:
         while cap.isOpened():
             ret, frame = cap.read()
             if ret:
-                c = self.segment_image(frame)
+                output = self.segment_image(frame)
+                if output is None:
+                    output = images[-1]
+                images.append(output)
             else:
                 break
+        saveVideo(images, "1d.avi")
+
+
+def saveVideo(images, output='./output.avi'):
+    h, w = images[0].shape[:2]
+    out = cv2.VideoWriter(output,cv2.VideoWriter_fourcc('M', 'J', 'P', 'G'), 10, (w, h))
+    for img in images:
+        out.write(img)
+    out.release()
 
 
 def detect_circle(gray_img):
@@ -152,8 +163,8 @@ def main(args):
 
 if __name__ == '__main__':
     ap = argparse.ArgumentParser()
-    ap.add_argument("-k", "--clusters", required=False, help="No. of clusters", default=3, type=int)
-    ap.add_argument("-train", "--train", required=False, help="Input training images", default='./data/train/green', type=str)
+    ap.add_argument("-k", "--clusters", required=False, help="No. of clusters", default=5, type=int)
+    ap.add_argument("-train", "--train", required=False, help="Input training images", default='./data/train/orange', type=str)
     ap.add_argument("-test", "--test", required=False, help="Test video", default='./data/detectbuoy.avi', type=str)
     args = vars(ap.parse_args())
 
